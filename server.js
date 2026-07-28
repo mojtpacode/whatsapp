@@ -8,30 +8,43 @@ app.use(express.json());
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ]
     }
 });
 
 client.on('qr', (qr) => {
-    // سيظهر رمز الـ QR في لوحة تحكم السيرفر لتقوم بمسحه
+    console.log('=== امسح رمز الـ QR التالي عبر الواتساب ===');
     qrcode.generate(qr, { small: true });
-    console.log('سجل الدخول عبر مسح الـ QR Code من الواتساب في هاتفك');
 });
 
 client.on('ready', () => {
-    console.log('السيرفر جاهز لإرسال الرسائل!');
+    console.log('جاهز لإرسال رسائل التأكيد!');
 });
 
 client.initialize();
 
 app.post('/send-otp', async (req, res) => {
     const { phoneNumber, code } = req.body;
-    const formattedNumber = `${phoneNumber.replace('+', '')}@c.us`;
+    if (!phoneNumber || !code) {
+        return res.status(400).json({ success: false, message: 'بيانات غير مكتملة' });
+    }
+
+    const formattedNumber = `${phoneNumber.replace('+', '').replace(/\s/g, '')}@c.us`;
     const message = `رمز التأكيد الخاص بك هو: *${code}*`;
 
     try {
         await client.sendMessage(formattedNumber, message);
-        res.status(200).json({ success: true });
+        res.status(200).json({ success: true, message: 'تم الإرسال بنجاح' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
