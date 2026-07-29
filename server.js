@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 let qrCodeImage = '';
 let isClientReady = false;
 
-// إعداد Puppeteer ليستخدم متصفح Chromium الخاص بالـ Dockerfile
+// إعداد Puppeteer ليستخدم Chromium المثبت من الـ Dockerfile
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -28,7 +28,7 @@ const client = new Client({
     }
 });
 
-// تحويل الـ QR Code إلى صورة Base64 فور توليده
+// تحويل الـ QR Code إلى صورة Base64 عند توليده
 client.on('qr', async (qr) => {
     try {
         qrCodeImage = await QRCode.toDataURL(qr);
@@ -38,14 +38,14 @@ client.on('qr', async (qr) => {
     }
 });
 
-// عند جاهزية الواتساب
+// عند اكتمال الاتصال بالواتساب
 client.on('ready', () => {
     isClientReady = true;
     qrCodeImage = '';
     console.log('✅ تم الاتصال بالواتساب بنجاح!');
 });
 
-// صفحة عرض الـ QR Code
+// صفحة الـ QR Code المباشرة
 app.get('/qr', (req, res) => {
     if (isClientReady) {
         return res.send(`
@@ -101,6 +101,7 @@ app.post('/send-otp', async (req, res) => {
 
 client.initialize();
 
-app.listen(PORT, () => {
+// ربط السيرفر على 0.0.0.0 لمنع خطأ 502 Bad Gateway
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 });
