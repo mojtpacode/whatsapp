@@ -1,20 +1,21 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
-const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-let qrImageUrl = '';
+let qrCodeImage = '';
 let isClientReady = false;
 
-// إعداد عميل الواتساب مع خيارات المتصفح المتوافقة مع Railway
+// إعداد متصفح Puppeteer ليعمل بسلاسة وبأقل استهلاك للموارد
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
+        executablePath: process.env.PUPPETEER_EXEC_PATH || null,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -22,58 +23,57 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
+            '--single-process',
             '--disable-gpu'
         ]
     }
 });
 
-// عند توليد رمز الـ QR
-client.on('qr', (qr) => {
-    // طباعة الرمز في السجلات كنسخة احتياطية
-    qrcode.generate(qr, { small: true });
-    
-    // إنشاء رابط صورة ناعمة ونقية للـ QR
-    qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qr)}&size=300x300`;
-    console.log('--- تم توليد رمز QR جديد، يمكنك رؤيته عبر الرابط /qr ---');
+// عند توليد الـ QR يتم تحويله فوراً لصورة Base64
+client.on('qr', async (qr) => {
+    try {
+        qrCodeImage = await QRCode.toDataURL(qr);
+        console.log('--- تم توليد رمز QR بنجاح! ---');
+    } catch (err) {
+        console.error('خطأ في توليد صورة الـ QR:', err);
+    }
 });
 
-// عند نجاح الاتصال
 client.on('ready', () => {
     isClientReady = true;
-    qrImageUrl = '';
-    console.log('✅ تم الاتصال بالواتساب بنجاح! السيرفر جاهز لإرسال الرسائل.');
+    qrCodeImage = '';
+    console.log('✅ تم الاتصال بالواتساب بنجاح!');
 });
 
-// صفحة عرض الـ QR Code كصورة ناعمة في المتصفح
+// صفحة الـ QR
 app.get('/qr', (req, res) => {
     if (isClientReady) {
         return res.send(`
             <div style="text-align:center; padding-top:50px; font-family:sans-serif;">
                 <h2 style="color:green;">✅ الحساب مرتبط وجاهز للعمل!</h2>
-                <p>لا تحتاج لمسح الـ QR مرة أخرى.</p>
             </div>
         `);
     }
 
-    if (qrImageUrl) {
+    if (qrCodeImage) {
         return res.send(`
             <div style="text-align:center; padding-top:30px; font-family:sans-serif;">
                 <h2>امسح رمز الـ QR لتسجيل الدخول</h2>
-                <img src="${qrImageUrl}" alt="WhatsApp QR Code" style="border: 5px solid #333; padding: 10px; border-radius: 8px;" />
-                <p>قم بتحديث الصفحة إذا انتهت صلاحية الرمز.</p>
+                <img src="${qrCodeImage}" alt="QR Code" style="width:280px; height:280px; border:4px solid #333; border-radius:10px; margin-top:10px;" />
+                <p>حدّث الصفحة إذا انتهت صلاحية الرمز.</p>
             </div>
         `);
     }
 
     res.send(`
         <div style="text-align:center; padding-top:50px; font-family:sans-serif;">
-            <h2>⏳ جاري إعداد رمز الـ QR...</h2>
-            <p>يرجى الانتظار بضع ثوانٍ ثم تحديث الصفحة.</p>
+            <h2>⏳ جاري تجهيز الـ QR Code...</h2>
+            <p>انتظر بضع ثوانٍ ثم قم بتحديث الصفحة.</p>
         </div>
     `);
 });
 
-// مسار إرسال الـ OTP لتطبيق Sketchware
+// مسار الـ OTP
 app.post('/send-otp', async (req, res) => {
     const { phoneNumber, code } = req.body;
 
@@ -82,22 +82,15 @@ app.post('/send-otp', async (req, res) => {
     }
 
     if (!phoneNumber || !code) {
-        return res.status(400).json({ success: false, message: 'يرجى تزويد رقم الهاتف وكود التحقق.' });
+        return res.status(400).json({ success: false, message: 'يرجى إرسال رقم الهاتف والكود.' });
     }
 
     try {
-        // تنظيف رقم الهاتف وتجهيزه بصيغة الواتساب الدولية
         let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
         const chatId = `${cleanNumber}@c.us`;
-
-        const message = `رمز التفعيل الخاص بك هو: ${code}`;
-
-        await client.sendMessage(chatId, message);
-        console.log(`تم إرسال الـ OTP إلى ${cleanNumber}`);
-        
-        res.json({ success: true, message: 'تم إرسال الرسالة بنجاح' });
+        await client.sendMessage(chatId, `رمز التفعيل الخاص بك هو: ${code}`);
+        res.json({ success: true, message: 'تم الإرسال بنجاح' });
     } catch (error) {
-        console.error('خطأ أثناء الإرسال:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -105,5 +98,5 @@ app.post('/send-otp', async (req, res) => {
 client.initialize();
 
 app.listen(PORT, () => {
-    console.log(`السيرفر يعمل الآن على البورت ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
