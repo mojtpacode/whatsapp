@@ -10,10 +10,12 @@ const PORT = process.env.PORT || 3000;
 let qrCodeImage = '';
 let isClientReady = false;
 
+// إعداد Puppeteer ليستخدم Chromium الذي قمنا بتثبيته عبر Dockerfile
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -21,12 +23,12 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process',
             '--disable-gpu'
         ]
     }
 });
 
+// تحويل الـ QR Code إلى صورة Base64 عند توليده
 client.on('qr', async (qr) => {
     try {
         qrCodeImage = await QRCode.toDataURL(qr);
@@ -36,76 +38,11 @@ client.on('qr', async (qr) => {
     }
 });
 
+// عند جاهزية الواتساب
 client.on('ready', () => {
     isClientReady = true;
     qrCodeImage = '';
     console.log('✅ تم الاتصال بالواتساب بنجاح!');
-});
-
-app.get('/qr', (req, res) => {
-    if (isClientReady) {
-        return res.send(`
-            <div style="text-align:center; padding-top:50px; font-family:sans-serif;">
-                <h2 style="color:green;">✅ الحساب مرتبط وجاهز للعمل!</h2>
-            </div>
-        `);
-    }
-
-    if (qrCodeImage) {
-        return res.send(`
-            <div style="text-align:center; padding-top:30px; font-family:sans-serif;">
-                <h2>امسح رمز الـ QR لتسجيل الدخول</h2>
-                <img src="${qrCodeImage}" alt="QR Code" style="width:280px; height:280px; border:4px solid #333; border-radius:10px; margin-top:10px;" />
-                <p style="color:#666;">قم بتحديث الصفحة إذا انتهت صلاحية الرمز.</p>
-            </div>
-        `);
-    }
-
-    res.send(`
-        <div style="text-align:center; padding-top:50px; font-family:sans-serif;">
-            <h2>⏳ جاري تجهيز الـ QR Code...</h2>
-            <p>انتظر بضع ثوانٍ ثم قم بتحديث الصفحة.</p>
-        </div>
-    `);
-});
-
-app.post('/send-otp', async (req, res) => {
-    const { phoneNumber, code } = req.body;
-
-    if (!isClientReady) {
-        return res.status(503).json({ success: false, message: 'سيرفر الواتساب غير متصل بعد.' });
-    }
-
-    if (!phoneNumber || !code) {
-        return res.status(400).json({ success: false, message: 'يرجى إرسال رقم الهاتف والكود.' });
-    }
-
-    try {
-        let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
-        const chatId = `${cleanNumber}@c.us`;
-        
-        await client.sendMessage(chatId, `رمز التفعيل الخاص بك هو: ${code}`);
-        
-        res.json({ success: true, message: 'تم إرسال الرسالة بنجاح' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-client.initialize();
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-        console.error('خطأ أثناء تحويل الـ QR إلى صورة:', err);
-    }
-});
-
-// عند اكتمال الاتصال بالواتساب
-client.on('ready', () => {
-    isClientReady = true;
-    qrCodeImage = '';
-    console.log('✅ تم الاتصال بالواتساب بنجاح! السيرفر جاهز لإرسال الرسائل.');
 });
 
 // صفحة الـ QR Code المباشرة
@@ -114,7 +51,6 @@ app.get('/qr', (req, res) => {
         return res.send(`
             <div style="text-align:center; padding-top:50px; font-family:sans-serif;">
                 <h2 style="color:green;">✅ الحساب مرتبط وجاهز للعمل!</h2>
-                <p>لا تحتاج لمسح الـ QR مرة أخرى.</p>
             </div>
         `);
     }
@@ -137,7 +73,7 @@ app.get('/qr', (req, res) => {
     `);
 });
 
-// مسار إرسال الـ OTP الخاص بتطبيقك
+// مسار إرسال الـ OTP
 app.post('/send-otp', async (req, res) => {
     const { phoneNumber, code } = req.body;
 
@@ -166,5 +102,5 @@ app.post('/send-otp', async (req, res) => {
 client.initialize();
 
 app.listen(PORT, () => {
-    console.log(`السيرفر يعمل الآن على البورت ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
