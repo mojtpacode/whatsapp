@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 let qrCodeImage = '';
 let isClientReady = false;
 
-// إعداد Puppeteer ليستخدم Chromium الذي قمنا بتثبيته عبر Dockerfile
+// إعداد Puppeteer ليستخدم متصفح Chromium الخاص بالـ Dockerfile
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -28,7 +28,7 @@ const client = new Client({
     }
 });
 
-// تحويل الـ QR Code إلى صورة Base64 عند توليده
+// تحويل الـ QR Code إلى صورة Base64 فور توليده
 client.on('qr', async (qr) => {
     try {
         qrCodeImage = await QRCode.toDataURL(qr);
@@ -45,7 +45,7 @@ client.on('ready', () => {
     console.log('✅ تم الاتصال بالواتساب بنجاح!');
 });
 
-// صفحة الـ QR Code المباشرة
+// صفحة عرض الـ QR Code
 app.get('/qr', (req, res) => {
     if (isClientReady) {
         return res.send(`
