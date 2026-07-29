@@ -1,18 +1,16 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
-const cors = require('cors');
 
-// 1. تعريف التطبيق وتجهيز المتغيرات الأساسية (ضروري جداً في البداية)
+// 1. تعريف التطبيق وتجهيز المتغيرات الأساسية
 const app = express();
 const port = process.env.PORT || 8080;
 
-app.use(cors());
 app.use(express.json());
 
 let qrCodeData = '';
 let isReady = false;
 
-// 2. إعداد عميل الواتساب مع خيارات Puppeteer المحسنة
+// 2. إعداد عميل الواتساب مع خيارات Puppeteer
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -70,7 +68,7 @@ app.get('/qr', (req, res) => {
     res.send(html);
 });
 
-// 4. مسار إرسال الـ OTP (يرد فوراً لتجنب الـ Timeout)
+// 4. مسار إرسال الـ OTP (رد فورى لمنع الـ Timeout)
 app.post('/send-otp', async (req, res) => {
     if (!isReady) {
         return res.status(503).json({ 
