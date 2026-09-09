@@ -12,14 +12,14 @@ app.use(express.json());
 
 let qrCodeData = '';
 let isReady = false;
-
 let client;
 
-function createClient() {
+function initClient() {
     client = new Client({
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
+            // إعدادات خاصة وموفرة للذاكرة لمنع خطأ Detached Frame في Railway
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -28,7 +28,9 @@ function createClient() {
                 '--no-first-run',
                 '--no-zygote',
                 '--single-process',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-extensions',
+                '--disable-component-update'
             ]
         }
     });
@@ -57,22 +59,27 @@ function createClient() {
     client.on('disconnected', (reason) => {
         isReady = false;
         qrCodeData = '';
-        console.log('⚠️ تم الانفصال، جاري إعادة التشغيل:', reason);
-        client.initialize();
+        console.log('⚠️ تم الانفصال، جاري إعادت المحاولة:', reason);
+        setTimeout(() => {
+            initClient();
+        }, 3000);
     });
 
-    client.initialize();
+    try {
+        client.initialize();
+    } catch (e) {
+        console.error('Initialization error:', e);
+    }
 }
 
-// مسار عرض الـ QR
+// مسار عرض الـ QR Code
 app.get('/qr', (req, res) => {
     if (isReady) {
         return res.send(`
             <div style="text-align:center;margin-top:15%;font-family:sans-serif;">
-                <h2 style="color:green;">✅ السيرفر متصل حالياً بالواتساب!</h2>
-                <p style="color:#555;">إذا لم تكن الرسائل تصل، اضغط الزر أدناه لحذف الجلسة وإعادة الربط:</p>
-                <br>
-                <a href="/logout" style="background:#dc2626;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">إعادة ربط حساب جديد (Logout)</a>
+                <h2 style="color:green;">✅ السيرفر متصل بالواتساب وجاهز!</h2>
+                <p>إذا واجهت مشاكل في الإرسال، اضغط هنا لإعادة الربط:</p>
+                <a href="/logout" style="background:#dc2626;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">إعادة ربط حساب جديد (Logout)</a>
             </div>
         `);
     }
@@ -81,8 +88,7 @@ app.get('/qr', (req, res) => {
         return res.send(`
             <div style="text-align:center;margin-top:20%;font-family:sans-serif;">
                 <h2>⏳ جاري تحضير الـ QR Code...</h2>
-                <p>انتظر 5 ثوانٍ ثم اضغط إعادة تحديث للصفحة</p>
-                <script>setTimeout(() => { location.reload(); }, 5000);</script>
+                <script>setTimeout(() => { location.reload(); }, 4000);</script>
             </div>
         `);
     }
@@ -100,7 +106,7 @@ app.get('/qr', (req, res) => {
     `);
 });
 
-// مسار الخروج وإعادة التعيين
+// مسار مسح الجلسة (Logout)
 app.get('/logout', async (req, res) => {
     isReady = false;
     qrCodeData = '';
@@ -115,24 +121,22 @@ app.get('/logout', async (req, res) => {
     if (fs.existsSync(sessionDir)) {
         try {
             fs.rmSync(sessionDir, { recursive: true, force: true });
-            console.log('🗑️ تم حذف ملفات الجلسة القديمة بنجاح');
         } catch (err) {
-            console.error('خطأ أثناء حذف الجلسة:', err);
+            console.error('Session clean error:', err);
         }
     }
 
-    createClient();
+    initClient();
 
     res.send(`
         <div style="text-align:center;margin-top:20%;font-family:sans-serif;">
-            <h2 style="color:green;">🔄 تم تنظيف الجلسة بنجاح!</h2>
-            <p>جاري الانتقال لصفحة الـ QR خلال لحظات...</p>
+            <h2 style="color:green;">🔄 تم إعادة تشغيل السيرفر وتنظيف الجلسة!</h2>
             <script>setTimeout(() => { window.location.href = "/qr"; }, 3000);</script>
         </div>
     `);
 });
 
-// مسار إرسال الـ OTP بآلية التحقق المباشر
+// مسار إرسال الـ OTP المحمي ضد توقف المتصفح
 app.post('/send-otp', async (req, res) => {
     if (!isReady) {
         return res.status(503).json({ 
@@ -150,30 +154,18 @@ app.post('/send-otp', async (req, res) => {
         });
     }
 
-    // تنظيف الرقم بالكامل من الرموز والمسافات
     let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
     if (cleanNumber.startsWith('00')) {
         cleanNumber = cleanNumber.substring(2);
     }
 
     try {
-        // الاستعلام عن وجود الرقم في الواتساب لاستخراج المعرف الصحيح
-        const numberDetails = await client.getNumberId(cleanNumber);
-
-        if (!numberDetails) {
-            console.log(`❌ الرقم ${cleanNumber} غير مسجل على الواتساب!`);
-            return res.status(400).json({ 
-                success: false, 
-                message: 'رقم الهاتف غير مسجل في الواتساب.' 
-            });
-        }
-
-        const targetJid = numberDetails._serialized;
+        const chatId = `${cleanNumber}@c.us`;
         const messageText = `رمز التحقق الخاص بك هو: ${code}`;
 
-        // إرسال الرسالة وانتظار التسليم الفعلي
-        await client.sendMessage(targetJid, messageText);
-        console.log(`✅ تم إرسال الرمز ${code} بنجاح إلى ${targetJid}`);
+        // إرسال مباشر لتجنب مشاكل Frame Navigation
+        await client.sendMessage(chatId, messageText);
+        console.log(`✅ تم إرسال الرمز ${code} بنجاح إلى ${chatId}`);
 
         return res.status(200).json({ 
             success: true, 
@@ -182,6 +174,13 @@ app.post('/send-otp', async (req, res) => {
 
     } catch (error) {
         console.error('❌ خطأ في الإرسال:', error.message || error);
+
+        // إذا حدث خطأ Frame Detached نعيد تهيئة العميل فوراً
+        if (error.message && error.message.includes('Detached')) {
+            isReady = false;
+            initClient();
+        }
+
         return res.status(500).json({
             success: false,
             message: 'حدث خطأ في السيرفر أثناء الإرسال: ' + error.message
@@ -191,5 +190,5 @@ app.post('/send-otp', async (req, res) => {
 
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server running on port ${port}`);
-    createClient();
+    initClient();
 });
