@@ -12,7 +12,7 @@ let qrCodeData = '';
 let isReady = false;
 let client;
 
-function initWhatsApp() {
+function createClient() {
     client = new Client({
         authStrategy: new LocalAuth(),
         puppeteer: {
@@ -46,16 +46,17 @@ function initWhatsApp() {
         isReady = false;
         qrCodeData = '';
         console.log('⚠️ تم الانفصال، جاري إعادة المحاولة:', reason);
-        setTimeout(initWhatsApp, 3000);
+        setTimeout(createClient, 3000);
     });
 
     try {
         client.initialize();
     } catch (e) {
-        console.error('Init Error:', e);
+        console.error('Initialization Error:', e);
     }
 }
 
+// مسار عرض الـ QR
 app.get('/qr', (req, res) => {
     if (isReady) return res.send('<h2 style="color:green;text-align:center;margin-top:20%;">✅ السيرفر جاهز ومرتبط بالواتساب!</h2>');
     if (!qrCodeData) return res.send('<h2 style="text-align:center;margin-top:20%;">⏳ جاري تحضير الـ QR... أعد التحديث بعد 5 ثوانٍ</h2>');
@@ -72,9 +73,36 @@ app.get('/qr', (req, res) => {
     `);
 });
 
+// دالة الإرسال مع إعادة المحاولة التلقائية في حال انفصال الـ Frame
+async function safeSendMessage(chatId, message, retries = 2) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            await client.sendMessage(chatId, message);
+            return true;
+        } catch (error) {
+            console.error(`❌ محاولة الإرسال (${attempt}) فشلت:`, error.message);
+            
+            if (attempt < retries && error.message && error.message.includes('detached')) {
+                console.log('🔄 جاري تنشيط صفحة المتصفح وإعادة المحاولة...');
+                try {
+                    // إجبار المتصفح على إعادة تحميل الصفحة الداخلية فقط بدون تدمير الجلسة
+                    if (client.puppeteerPage) {
+                        await client.puppeteerPage.reload({ waitUntil: ['networkidle0', 'domcontentloaded'] });
+                    }
+                } catch (e) {
+                    console.log('Page reload failed:', e.message);
+                }
+                await new Promise(r => setTimeout(r, 2000));
+            } else if (attempt === retries) {
+                throw error;
+            }
+        }
+    }
+}
+
 app.post('/send-otp', async (req, res) => {
     if (!isReady) {
-        return res.status(503).json({ success: false, message: 'السيرفر غير مرتبط بالواتساب حالياً.' });
+        return res.status(503).json({ success: false, message: 'السيرفر غير مرتبط بالواتساب حالياً. انتظر بضع ثوانٍ وأعد المحاولة.' });
     }
 
     const { phoneNumber, code } = req.body;
@@ -89,17 +117,16 @@ app.post('/send-otp', async (req, res) => {
     const messageText = `رمز التحقق الخاص بك هو: ${code}`;
 
     try {
-        await client.sendMessage(chatId, messageText);
+        await safeSendMessage(chatId, messageText);
         console.log(`✅ تم إرسال الرمز ${code} بنجاح إلى ${cleanNumber}`);
         return res.status(200).json({ success: true, message: 'تم إرسال الرمز بنجاح' });
     } catch (error) {
-        console.error('❌ خطأ في الإرسال:', error.message || error);
+        console.error('❌ فشل الإرسال النهائي:', error.message);
         
-        // عند حدوث خطأ Frame Detached يتم إعادة تعيين العميل تلقائياً
-        if (error.message && (error.message.includes('detached') || error.message.includes('closed'))) {
+        // في حال الإخفاق التام فقط نعيد بناء الجلسة
+        if (error.message && error.message.includes('detached')) {
             isReady = false;
-            try { await client.destroy(); } catch (e) {}
-            setTimeout(initWhatsApp, 2000);
+            setTimeout(createClient, 2000);
         }
 
         return res.status(500).json({ success: false, message: 'حدث خطأ في السيرفر أثناء الإرسال: ' + error.message });
@@ -108,5 +135,5 @@ app.post('/send-otp', async (req, res) => {
 
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server running on port ${port}`);
-    initWhatsApp();
+    createClient();
 });
