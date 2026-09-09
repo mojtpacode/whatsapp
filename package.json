@@ -6,9 +6,8 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.0",
-    "cors": "^2.8.5",
     "express": "^4.19.2",
-    "qrcode": "^1.5.3"
+    "cors": "^2.8.5",
+    "whatsapp-web.js": "^1.25.0"
   }
 }
