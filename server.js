@@ -64,7 +64,7 @@ function createClient() {
     client.initialize();
 }
 
-// مسار عرض الـ QR Code وواجهة التحكم
+// مسار عرض الـ QR
 app.get('/qr', (req, res) => {
     if (isReady) {
         return res.send(`
@@ -89,22 +89,18 @@ app.get('/qr', (req, res) => {
     
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrCodeData)}`;
     
-    const html = `
+    res.send(`
         <html>
-            <head>
-                <title>WhatsApp QR</title>
-                <meta http-equiv="refresh" content="10">
-            </head>
+            <head><title>WhatsApp QR</title><meta http-equiv="refresh" content="10"></head>
             <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">
                 <h2>امسح الـ QR Code لربط الحساب:</h2>
                 <img src="${qrImageUrl}" width="300" height="300" />
             </body>
         </html>
-    `;
-    res.send(html);
+    `);
 });
 
-// مسار إعادة التعيين
+// مسار الخروج وإعادة التعيين
 app.get('/logout', async (req, res) => {
     isReady = false;
     qrCodeData = '';
@@ -136,7 +132,7 @@ app.get('/logout', async (req, res) => {
     `);
 });
 
-// مسار إرسال الـ OTP المحسّن للوصول المباشر
+// مسار إرسال الـ OTP بآلية التحقق المباشر
 app.post('/send-otp', async (req, res) => {
     if (!isReady) {
         return res.status(503).json({ 
@@ -154,30 +150,41 @@ app.post('/send-otp', async (req, res) => {
         });
     }
 
-    // تنظيف وتنسيق الرقم بالشكل الدولي الصحيح
+    // تنظيف الرقم بالكامل من الرموز والمسافات
     let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
     if (cleanNumber.startsWith('00')) {
         cleanNumber = cleanNumber.substring(2);
     }
 
-    // التركيب المباشر لـ ChatID المعتمد في الواتساب
-    const chatId = `${cleanNumber}@c.us`;
-    const messageText = `رمز التحقق الخاص بك هو: ${code}`;
-
     try {
-        // الإرسال المباشر باستخدام الـ chatId
-        await client.sendMessage(chatId, messageText);
-        console.log(`✅ تم إرسال الرمز ${code} بنجاح إلى ${chatId}`);
-        
+        // الاستعلام عن وجود الرقم في الواتساب لاستخراج المعرف الصحيح
+        const numberDetails = await client.getNumberId(cleanNumber);
+
+        if (!numberDetails) {
+            console.log(`❌ الرقم ${cleanNumber} غير مسجل على الواتساب!`);
+            return res.status(400).json({ 
+                success: false, 
+                message: 'رقم الهاتف غير مسجل في الواتساب.' 
+            });
+        }
+
+        const targetJid = numberDetails._serialized;
+        const messageText = `رمز التحقق الخاص بك هو: ${code}`;
+
+        // إرسال الرسالة وانتظار التسليم الفعلي
+        await client.sendMessage(targetJid, messageText);
+        console.log(`✅ تم إرسال الرمز ${code} بنجاح إلى ${targetJid}`);
+
         return res.status(200).json({ 
             success: true, 
             message: 'تم إرسال الرمز بنجاح' 
         });
+
     } catch (error) {
         console.error('❌ خطأ في الإرسال:', error.message || error);
         return res.status(500).json({
             success: false,
-            message: 'فشل إرسال الرسالة عبر الواتساب: ' + error.message
+            message: 'حدث خطأ في السيرفر أثناء الإرسال: ' + error.message
         });
     }
 });
